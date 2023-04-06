@@ -1,3 +1,4 @@
+import secrets
 import subprocess
 try:
     import PySimpleGUI as sg
@@ -7,7 +8,7 @@ except:
 import os
 import io
 from PIL import Image
-
+import torch
 try:
     from kandinsky2 import get_kandinsky2
 except:
@@ -23,8 +24,8 @@ def generate_thumbnail_grid(image_file_paths, num_cols=8):
         if (i + 1) % num_cols == 0:
             grid.append(row)
             row = []
-    if row:
-        grid.append(row)
+        if row:
+            grid.append(row)
     return grid
 
 
@@ -59,7 +60,11 @@ def main():
         for label in slider_labels
     ]]
     layout = [
-        [sg.Text('Enter text:', size=(50, 1)), sg.InputText(key='input_text')],
+        [sg.Text('Prompt:', size=(50, 1)), sg.InputText(key='input_text')],
+        [sg.Text('Negative Prior:', size=(50, 1)), sg.InputText(key='n_prompt_1')],
+        [sg.Text('Negative Decoder:', size=(50, 1)), sg.InputText(key='n_prompt_2')],
+        [sg.Text('Seed:', size=(50, 1)), sg.InputText(key='seed')],
+        [sg.Combo(['p_sampler', 'ddim_sampler', 'plms_sampler'], default_value='p_sampler', readonly=True, size=(50, 50), key='sampler')],
         [sg.Button('Initialize Model'),
          sg.Button('Generate Images'),],
         [
@@ -106,6 +111,15 @@ def main():
             if values['input_text'] == "":
                 values['input_text'] = "Text saying empty"
             try:
+                if values['seed'] != '':
+                    try:
+                        seed = int(values['seed'])
+                    except:
+                        seed = secrets.randbelow(99999999999)
+                else:
+                    seed = secrets.randbelow(99999999999)
+
+                torch.manual_seed(seed)
                 images = model.generate_text2img(
                     values['input_text'],
                     num_steps=int(values['num_steps']),
@@ -113,9 +127,11 @@ def main():
                     guidance_scale=int(values['guidance_scale']),
                     h=int(values['h']),
                     w=int(values['w']),
-                    sampler='p_sampler',
+                    sampler=values['sampler'],
                     prior_cf_scale=int(values['prior_cf_scale']),
-                    prior_steps=str(int(values['prior_steps']))
+                    prior_steps=str(int(values['prior_steps'])),
+                    negative_prior_prompt=str(values['n_prompt_1']),
+                    negative_decoder_prompt=str(values['n_prompt_2']),
                 )
             except Exception as e:
                 print(e)

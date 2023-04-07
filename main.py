@@ -28,11 +28,41 @@ def generate_thumbnail_grid(image_file_paths, num_cols=8):
             grid.append(row)
     return grid
 
+def run_kandinsky(model, values):
+    if values['input_text'] == "":
+        values['input_text'] = "Text saying empty"
+    try:
+        if values['seed'] != '':
+            try:
+                seed = int(values['seed'])
+            except:
+                seed = secrets.randbelow(99999999999)
+        else:
+            seed = secrets.randbelow(99999999999)
+
+        torch.manual_seed(seed)
+        images = model.generate_text2img(
+            values['input_text'],
+            num_steps=int(values['num_steps']),
+            batch_size=1,
+            guidance_scale=int(values['guidance_scale']),
+            h=int(values['h']),
+            w=int(values['w']),
+            sampler=values['sampler'],
+            prior_cf_scale=int(values['prior_cf_scale']),
+            prior_steps=str(int(values['prior_steps'])),
+            negative_prior_prompt=str(values['n_prompt_1']),
+            negative_decoder_prompt=str(values['n_prompt_2']),
+        )
+        return images
+    except Exception as e:
+        print(e)
+
 
 def main():
     image_file_paths = []
 
-    sg.set_options(font=("Helvetica", 24))
+    sg.set_options(font=("Helvetica", 16))
     keys = ['input_text', 'num_steps', 'guidance_scale', 'h', 'w', 'prior_cf_scale', 'prior_steps', 'gui_scale']
 
     slider_labels = [
@@ -46,6 +76,8 @@ def main():
 
     sliders = [[
         sg.Column([
+            [sg.Text(label["text"], size=(12, 1), key=f'label_{label["key"]}', justification='center')],
+            # Add this line
             [sg.Text(size=(4, 1), key=f'value_{label["key"]}', justification='center')],
             [sg.Slider(range=(1, 100), default_value=75, orientation='v', key=label["key"], size=(8, 20),
                        enable_events=True) if label["key"] == 'num_steps' else
@@ -55,7 +87,14 @@ def main():
                        enable_events=True) if label["key"] in ['h', 'w'] else
              sg.Slider(range=(1, 10), default_value=4, orientation='v', key=label["key"], size=(8, 20),
                        enable_events=True)],
-            [sg.Graph((50, 50), (0, 0), (50, 50), key=f"graph_{label['key']}")]
+            [sg.Text(size=(4, 1), key=f'graph_{label["key"]}', justification='center')],
+            [sg.InputText(size=(4, 1), default_text=str(
+                75 if label["key"] == 'num_steps' else 10 if label["key"] == 'guidance_scale' else 768 if label[
+                                                                                                              "key"] in [
+                                                                                                              'h',
+                                                                                                              'w'] else 4),
+                          key=f'input_{label["key"]}',
+                          enable_events=True, justification='center')]
         ], element_justification='center', expand_x=True, expand_y=True)
         for label in slider_labels
     ]]
@@ -64,7 +103,7 @@ def main():
         [sg.Text('Negative Prior:', size=(50, 1)), sg.InputText(key='n_prompt_1')],
         [sg.Text('Negative Decoder:', size=(50, 1)), sg.InputText(key='n_prompt_2')],
         [sg.Text('Seed:', size=(50, 1)), sg.InputText(key='seed')],
-        [sg.Combo(['p_sampler', 'ddim_sampler', 'plms_sampler'], default_value='p_sampler', readonly=True, size=(50, 50), key='sampler')],
+        [sg.Text('Sampler:', size=(50, 1)), sg.Combo(['p_sampler', 'ddim_sampler', 'plms_sampler'], default_value='p_sampler', readonly=True, size=(50, 50), key='sampler')],
         [sg.Button('Initialize Model'),
          sg.Button('Generate Images'),],
         [
@@ -91,8 +130,8 @@ def main():
     ]
 
     window = sg.Window('Kandinsky2 Interface', layout, resizable=True, finalize=True)
-    for label in slider_labels:
-        window[f"graph_{label['key']}"].draw_text(label['text'], (25, 25), angle=45, font=("Helvetica", 10))
+    #for label in slider_labels:
+    #    window[f"graph_{label['key']}"].draw_text(label['text'], (25, 25), angle=45, font=("Helvetica", 10))
     model = None
     images = None
 
@@ -108,33 +147,12 @@ def main():
             model = get_kandinsky2('cuda', task_type='text2img')
             sg.popup('Model initialized')
         elif event == 'Generate Images' and model is not None:
-            if values['input_text'] == "":
-                values['input_text'] = "Text saying empty"
-            try:
-                if values['seed'] != '':
-                    try:
-                        seed = int(values['seed'])
-                    except:
-                        seed = secrets.randbelow(99999999999)
-                else:
-                    seed = secrets.randbelow(99999999999)
+            window.perform_long_operation(lambda: run_kandinsky(model, values), 'kandinsky-result')
 
-                torch.manual_seed(seed)
-                images = model.generate_text2img(
-                    values['input_text'],
-                    num_steps=int(values['num_steps']),
-                    batch_size=1,
-                    guidance_scale=int(values['guidance_scale']),
-                    h=int(values['h']),
-                    w=int(values['w']),
-                    sampler=values['sampler'],
-                    prior_cf_scale=int(values['prior_cf_scale']),
-                    prior_steps=str(int(values['prior_steps'])),
-                    negative_prior_prompt=str(values['n_prompt_1']),
-                    negative_decoder_prompt=str(values['n_prompt_2']),
-                )
-            except Exception as e:
-                print(e)
+        elif event == 'kandinsky-result':
+
+            images = values[event]
+
             image_bytes = io.BytesIO()
             images[0].save(image_bytes, format='PNG')
             window['image_display'].update(data=image_bytes.getvalue())
@@ -165,6 +183,19 @@ def main():
                 image_bytes = io.BytesIO()
                 image.save(image_bytes, format='PNG')
                 window['image_display'].update(data=image_bytes.getvalue())
+        for label in slider_labels:
+            key = label["key"]
+            if event == key:
+                window[f'input_{key}'].update(values[key])
+            elif event == f'input_{key}':
+                try:
+                    new_value = int(values[f'input_{key}'])
+                    window[key].update(new_value)
+                except ValueError:
+                    pass  # Invalid integer input, do nothing
+
     window.close()
 
 main()
+
+
